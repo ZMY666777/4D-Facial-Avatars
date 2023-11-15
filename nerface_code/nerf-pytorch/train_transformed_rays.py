@@ -19,6 +19,8 @@ from nerf.load_flame import load_flame_data
 from nerf import (CfgNode, get_embedding_function, get_ray_bundle, img2mse,
                   load_llff_data, meshgrid_xy, models,
                   mse2psnr, run_one_iter_of_nerf, dump_rays, GaussianSmoothing)
+
+from TensoRF.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
 #from gpu_profile import gpu_profile
 
 def main():
@@ -107,6 +109,27 @@ def main():
         include_input=cfg.models.coarse.include_input_xyz,
         log_sampling=cfg.models.coarse.log_sampling_xyz,
     )
+    model_name = 'TensorVMSplit'
+    aabb = torch.tensor([[-1.5000, -1.5000, -1.5000],[ 1.5000,  1.5000,  1.5000]], device='cuda:0')
+    reso_cur = [128, 128, 128]
+    n_lamb_sigma = [16, 16, 16]
+    n_lamb_sh = [48, 48, 48]
+    data_dim_color = 27
+    near_far = [0.2, 0.8]
+    shadingMode = 'MLP_Fea'
+    alphaMask_thresq = 0.0001
+    density_shift = -10
+    distance_scale = 25
+    pos_pe = 6
+    view_pe = 2
+    fea_pe = 2
+    featureC = 128
+    step_ratio = 1.0
+    fea2denseAct = 'softplus'
+    tensorf = eval(model_name)(aabb, reso_cur, device,
+                               density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=data_dim_color, near_far=near_far,
+                               shadingMode=shadingMode, alphaMask_thres = alphaMask_thresq, density_shift = density_shift, distance_scale = distance_scale,
+                               pos_pe = pos_pe, view_pe = view_pe, fea_pe = fea_pe, featureC = featureC, step_ratio = step_ratio)
 
     encode_direction_fn = None
     if cfg.models.coarse.use_viewdirs:
@@ -138,7 +161,7 @@ def main():
             include_input_dir=cfg.models.fine.include_input_dir,
             use_viewdirs=cfg.models.fine.use_viewdirs,
             num_layers = cfg.models.coarse.num_layers,
-            hidden_size =cfg.models.coarse.hidden_size,
+            hidden_size = cfg.models.coarse.hidden_size,
             include_expression=True
         )
         model_fine.to(device)
@@ -191,7 +214,10 @@ def main():
         background = None
 
     # Initialize optimizer.
+    print(type(model_coarse.parameters))
     trainable_parameters = list(model_coarse.parameters())
+    for i in range(0, len(trainable_parameters)):
+        print("ssssssssssss", trainable_parameters[i].shape)
     if model_fine is not None:
         trainable_parameters += list(model_fine.parameters())
     if train_background:
@@ -206,18 +232,12 @@ def main():
             trainable_parameters.append(latent_codes)
             latent_codes.requires_grad = True
 
-    if train_background:
-        optimizer = getattr(torch.optim, cfg.optimizer.type)(
-            [{'params':trainable_parameters},
-             {'params':background, 'lr':cfg.optimizer.lr}],
-            lr=cfg.optimizer.lr
-        )
-    else:
-        optimizer = getattr(torch.optim, cfg.optimizer.type)(
-            [{'params':trainable_parameters},
-             {'params': background, 'lr': cfg.optimizer.lr}        ], # this is obsolete but need for continuing training
-            lr=cfg.optimizer.lr
-        )
+    optimizer = getattr(torch.optim, cfg.optimizer.type)(
+        [{'params':trainable_parameters},
+         {'params': background, 'lr': cfg.optimizer.lr}], # this is obsolete but need for continuing training
+        lr=cfg.optimizer.lr
+    )
+    print("optimizer,",optimizer)
     # Setup logging.
     logdir = os.path.join(cfg.experiment.logdir, cfg.experiment.id)
     os.makedirs(logdir, exist_ok=True)
@@ -289,7 +309,7 @@ def main():
                 ray_directions[select_inds],
             )
             target_ray_values = target_ray_values[select_inds].to(device)
-            #target_ray_values = target_ray_values[select_inds].to(device)
+            # target_ray_values = target_ray_values[select_inds].to(device)
             # ray_bundle = torch.stack([ray_origins, ray_directions], dim=0).to(device)
 
             rgb_coarse, _, _, rgb_fine, _, _ = run_one_iter_of_nerf(
@@ -331,13 +351,13 @@ def main():
                 meshgrid_xy(torch.arange(H).to(device), torch.arange(W).to(device)),
                 dim=-1,
             )
-
+            # 生成图像的坐标集合
             # Only randomly choose rays that are in the bounding box !
             # coords = torch.stack(
             #     meshgrid_xy(torch.arange(bbox[0],bbox[1]).to(device), torch.arange(bbox[2],bbox[3]).to(device)),
             #     dim=-1,
             # )
-
+            # 选像素坐标生成光线
             coords = coords.reshape((-1, 2))
             # select_inds = np.random.choice(
             #     coords.shape[0], size=(cfg.nerf.train.num_random_rays), replace=False
@@ -360,6 +380,7 @@ def main():
             #   background_ray_values = None
             #background_ray_values = None
             then = time.time()
+
             rgb_coarse, _, _, rgb_fine, _, _, weights = run_one_iter_of_nerf(
                 H,
                 W,
@@ -377,6 +398,7 @@ def main():
                 latent_code = latent_code if not disable_latent_codes else torch.zeros(32,device=device)
 
             )
+
             target_ray_values = target_s
 
         coarse_loss = torch.nn.functional.mse_loss(
@@ -583,7 +605,6 @@ def main():
                 )
 
         #gpu_profile(frame=sys._getframe(), event='line', arg=None)
-
 
         if i % cfg.experiment.save_every == 0 or i == cfg.experiment.train_iters - 1:
             checkpoint_dict = {
