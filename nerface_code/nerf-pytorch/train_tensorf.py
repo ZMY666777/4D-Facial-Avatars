@@ -13,7 +13,7 @@ import yaml
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 import matplotlib.pyplot as plt
-
+from dataLoader import dataset_dict
 from nerf.load_flame import load_flame_data
 
 from nerf import (CfgNode, get_embedding_function, get_ray_bundle, img2mse,
@@ -24,7 +24,7 @@ from TensoRF.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaG
 #from gpu_profile import gpu_profile
 
 def main():
-
+    dataset = dataset_dict['blender']
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config", type=str, required=True, help="Path to (.yml) config file."
@@ -110,12 +110,12 @@ def main():
         log_sampling=cfg.models.coarse.log_sampling_xyz,
     )
     model_name = 'TensorVMSplit'
-    aabb = torch.tensor([[-1.5000, -1.5000, -1.5000],[ 1.5000,  1.5000,  1.5000]], device='cuda:0')
+    aabb = torch.tensor([[-1.0000, -1.0000, -1.0000], [1.0000, 1.0000, 1.0000]], device='cuda:0')
     reso_cur = [512, 512, 64]
     n_lamb_sigma = [16, 16, 16]
     n_lamb_sh = [48, 48, 48]
     data_dim_color = 27
-    near_far = [0.2,0.8]
+    near_far = [0.2, 0.8]
     shadingMode = 'MLP_Fea'
     alphaMask_thresq = 0.0001
     density_shift = -10
@@ -123,8 +123,8 @@ def main():
     pos_pe = 6
     view_pe = 2
     fea_pe = 2
-    featureC = 128
-    step_ratio = 0.5
+    featureC = 64
+    step_ratio = 1.0
     fea2denseAct = 'softplus'
     tensorf = eval(model_name)(aabb, reso_cur, device,
                                density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=data_dim_color, near_far=near_far,

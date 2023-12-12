@@ -110,12 +110,12 @@ def main():
         log_sampling=cfg.models.coarse.log_sampling_xyz,
     )
     model_name = 'TensorVMSplit'
-    aabb = torch.tensor([[-1.5000, -1.5000, -1.5000],[ 1.5000,  1.5000,  1.5000]], device='cuda:0')
+    aabb = torch.tensor([[-0.9000, -0.9000, -0.9000], [0.9000, 0.9000, 0.9000]], device='cuda:0')
     reso_cur = [128, 128, 128]
     n_lamb_sigma = [16, 16, 16]
     n_lamb_sh = [48, 48, 48]
     data_dim_color = 27
-    near_far = [0.2, 0.8]
+    near_far = [0.2, 0.6]
     shadingMode = 'MLP_Fea'
     alphaMask_thresq = 0.0001
     density_shift = -10
@@ -123,7 +123,7 @@ def main():
     pos_pe = 6
     view_pe = 2
     fea_pe = 2
-    featureC = 128
+    featureC = 28
     step_ratio = 1.0
     fea2denseAct = 'softplus'
     tensorf = eval(model_name)(aabb, reso_cur, device,
@@ -150,9 +150,13 @@ def main():
         hidden_size=cfg.models.coarse.hidden_size,
         include_expression=True
     )
+    # model_coarse = tensorf
     model_coarse.to(device)
+    print(model_coarse)
     # If a fine-resolution model is specified, initialize it.
     model_fine = None
+    # model_fine = tensorf
+    # model_fine.to(device)
     if hasattr(cfg.models, "fine"):
         model_fine = getattr(models, cfg.models.fine.type)(
             num_encoding_fn_xyz=cfg.models.fine.num_encoding_fn_xyz,
@@ -214,12 +218,11 @@ def main():
         background = None
 
     # Initialize optimizer.
-    print(type(model_coarse.parameters))
     trainable_parameters = list(model_coarse.parameters())
-    for i in range(0, len(trainable_parameters)):
-        print("ssssssssssss", trainable_parameters[i].shape)
+
     if model_fine is not None:
         trainable_parameters += list(model_fine.parameters())
+        print("trainable_parameters",trainable_parameters)
     if train_background:
         #background.requires_grad = True
         #trainable_parameters.append(background) # add it later when init optimizer for different lr
@@ -232,12 +235,19 @@ def main():
             trainable_parameters.append(latent_codes)
             latent_codes.requires_grad = True
 
-    optimizer = getattr(torch.optim, cfg.optimizer.type)(
-        [{'params':trainable_parameters},
-         {'params': background, 'lr': cfg.optimizer.lr}], # this is obsolete but need for continuing training
-        lr=cfg.optimizer.lr
-    )
-    print("optimizer,",optimizer)
+    if train_background:
+        optimizer = getattr(torch.optim, cfg.optimizer.type)(
+            [{'params':trainable_parameters},
+             {'params':background, 'lr':cfg.optimizer.lr}],
+            lr=cfg.optimizer.lr
+        )
+    else:
+        optimizer = getattr(torch.optim, cfg.optimizer.type)(
+            [{'params':trainable_parameters},
+             {'params': background, 'lr': cfg.optimizer.lr}        ], # this is obsolete but need for continuing training
+            lr=cfg.optimizer.lr
+        )
+        print("optimizer:",optimizer)
     # Setup logging.
     logdir = os.path.join(cfg.experiment.logdir, cfg.experiment.id)
     os.makedirs(logdir, exist_ok=True)
@@ -284,8 +294,8 @@ def main():
     for i in trange(start_iter, cfg.experiment.train_iters):
 
         model_coarse.train()
-        if model_fine:
-            model_coarse.train()
+        # if model_fine:
+        #     model_coarse.train()
 
         rgb_coarse, rgb_fine = None, None
         target_ray_values = None
@@ -401,9 +411,7 @@ def main():
 
             target_ray_values = target_s
 
-        coarse_loss = torch.nn.functional.mse_loss(
-            rgb_coarse[..., :3], target_ray_values[..., :3]
-        )
+        coarse_loss = torch.mean((target_ray_values[..., :3] - rgb_coarse[..., :3]) ** 2)
         fine_loss = None
         if rgb_fine is not None:
             fine_loss = torch.nn.functional.mse_loss(

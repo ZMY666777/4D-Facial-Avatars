@@ -272,8 +272,8 @@ def main():
 
     # Initialize a coarse resolution model.
     model_name = 'TensorVMSplit'
-    aabb = torch.tensor([[-1.5000, -1.5000, -1.5000],[ 1.5000,  1.5000,  1.5000]], device='cuda:0')
-    reso_cur = [512, 512, 256]
+    aabb = torch.tensor([[-1.0000, -1.0000, -1.0000], [1.0000, 1.0000, 1.0000]], device='cuda:0')
+    reso_cur = [512, 512, 64]
     n_lamb_sigma = [16, 16, 16]
     n_lamb_sh = [48, 48, 48]
     data_dim_color = 27
@@ -285,7 +285,7 @@ def main():
     pos_pe = 6
     view_pe = 2
     fea_pe = 2
-    featureC = 128
+    featureC = 64
     step_ratio = 1.0
     fea2denseAct = 'softplus'
     tensorf = eval(model_name)(aabb, reso_cur, device,

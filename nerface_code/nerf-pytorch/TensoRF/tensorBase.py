@@ -411,6 +411,7 @@ class TensorBase(torch.nn.Module):
         xyz, dirs = rays_chunk[..., : 3], rays_chunk[..., 3:]
 
         x = xyz  # self.relu(self.layers_xyz[0](xyz))
+        # x[...,1:3] = -1 * x[...,1:3]
         latent_code = latent_code.repeat(xyz.shape[0], 1)
         expr_encoding = (expr * 1 / 3).repeat(xyz.shape[0], 1)
         initial = torch.cat((xyz, expr_encoding, latent_code), dim=1)

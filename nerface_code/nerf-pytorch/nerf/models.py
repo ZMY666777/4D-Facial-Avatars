@@ -234,12 +234,14 @@ class ConditionalBlendshapePaperNeRFModel(torch.nn.Module):
         self.relu = torch.nn.functional.relu
 
     def forward(self, x,  expr=None, latent_code=None, **kwargs):
+        # 将输入内容拆开，拆分成空间坐标以及方向 空间坐标维度 65536 63 空间方向维度 65536 24 表情向量维度 76 潜在编码维度 32
         xyz, dirs = x[..., : self.dim_xyz], x[..., self.dim_xyz :]
         x = xyz#self.relu(self.layers_xyz[0](xyz))
         latent_code = latent_code.repeat(xyz.shape[0], 1)
         if self.dim_expression > 0:
             expr_encoding = (expr * 1 / 3).repeat(xyz.shape[0], 1)
             initial = torch.cat((xyz, expr_encoding, latent_code), dim=1)
+            # x 65535 171(63+76+32)
             x = initial
         for i in range(6):
             if i == 3:
