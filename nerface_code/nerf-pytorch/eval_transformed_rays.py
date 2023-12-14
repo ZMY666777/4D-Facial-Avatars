@@ -37,7 +37,7 @@ from nerf import (
     run_one_iter_of_nerf,
     meshgrid_xy
 )
-
+from TensoRF.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
 
 def save_plt_image(im1, outname):
     fig = plt.figure()
@@ -271,16 +271,28 @@ def main():
         )
 
     # Initialize a coarse resolution model.
-    model_coarse = getattr(models, cfg.models.coarse.type)(
-        num_encoding_fn_xyz=cfg.models.coarse.num_encoding_fn_xyz,
-        num_encoding_fn_dir=cfg.models.coarse.num_encoding_fn_dir,
-        include_input_xyz=cfg.models.coarse.include_input_xyz,
-        include_input_dir=cfg.models.coarse.include_input_dir,
-        use_viewdirs=cfg.models.coarse.use_viewdirs,
-        num_layers=cfg.models.coarse.num_layers,
-        hidden_size=cfg.models.coarse.hidden_size,
-        include_expression=True
-    )
+    model_name = 'TensorVMSplit'
+    aabb = torch.tensor([[-1.0000, -1.0000, -1.0000], [1.0000, 1.0000, 1.0000]], device='cuda:0')
+    reso_cur = [512, 512, 64]
+    n_lamb_sigma = [16, 16, 16]
+    n_lamb_sh = [48, 48, 48]
+    data_dim_color = 27
+    near_far = [0.2,0.8]
+    shadingMode = 'MLP_Fea'
+    alphaMask_thresq = 0.0001
+    density_shift = -10
+    distance_scale = 25
+    pos_pe = 6
+    view_pe = 2
+    fea_pe = 2
+    featureC = 64
+    step_ratio = 1.0
+    fea2denseAct = 'softplus'
+    tensorf = eval(model_name)(aabb, reso_cur, device,
+                               density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=data_dim_color, near_far=near_far,
+                               shadingMode=shadingMode, alphaMask_thres = alphaMask_thresq, density_shift = density_shift, distance_scale = distance_scale,
+                               pos_pe = pos_pe, view_pe = view_pe, fea_pe = fea_pe, featureC = featureC, step_ratio = step_ratio)
+    model_coarse = tensorf
     model_coarse.to(device)
 
     # If a fine-resolution model is specified, initialize it.
@@ -328,6 +340,7 @@ def main():
             print("loading index map for latent codes...")
             idx_map = np.load(cfg.dataset.basedir + "/index_map.npy").astype(int)
             print("loaded latent codes from checkpoint, with shape ", latent_codes.shape)
+            print("idx_map,",idx_map)
     model_coarse.eval()
     if model_fine:
         model_fine.eval()
@@ -392,9 +405,6 @@ def main():
     for i, expression in enumerate(tqdm(render_expressions)):
     #for i in range(75,151):
 
-
-
-
         #if i%25 != 0: ### TODO generate only every 25th im
         #if i != 511: ### TODO generate only every 25th im
         #    continue
@@ -417,8 +427,8 @@ def main():
             #expression = render_expressions[0] ### TODO fixes expr
             #expression = torch.zeros_like(expression).to(device)
 
-            ablate = 'view_dir'
-
+            ablate = None
+            ray_directions_ablation = None
             if ablate == 'expression':
                 pose = render_poses[100]
             elif ablate == 'latent_code':
@@ -430,7 +440,7 @@ def main():
             elif ablate == 'view_dir':
                 pose = render_poses[100]
                 expression = render_expressions[100]
-                _, ray_directions_ablation = get_ray_bundle(hwf[0], hwf[1], hwf[2], render_poses[240+i][:3, :4])
+                _, ray_directions_ablation = get_ray_bundle(hwf[0], hwf[1], hwf[2], render_poses[i][:3, :4])
 
             pose = pose[:3, :4]
 
@@ -441,7 +451,7 @@ def main():
                     index_of_image_after_train_shuffle = idx_map[i,1]
             #index_of_image_after_train_shuffle = 10 ## TODO Fixes latent code
             #index_of_image_after_train_shuffle = idx_map[84,1] ## TODO Fixes latent code v2 for andrei
-            index_of_image_after_train_shuffle = idx_map[10,1] ## TODO Fixes latent code - USE THIS if not ablating!
+            index_of_image_after_train_shuffle = 0 ## TODO Fixes latent code - USE THIS if not ablating!
 
             latent_code = latent_codes[index_of_image_after_train_shuffle].to(device) if use_latent_code else None
 
@@ -466,7 +476,7 @@ def main():
                 ray_directions_ablation = ray_directions_ablation
             )
             rgb = rgb_fine if rgb_fine is not None else rgb_coarse
-            normals = torch_normal_map(disp_fine, focal, weights, clean=True)
+            normals = torch_normal_map(disp_coarse, focal, weights, clean=True)
             #normals = normal_map_from_depth_map_backproject(disp_fine.cpu().numpy())
             save_plt_image(normals.cpu().numpy().astype('uint8'), os.path.join(configargs.savedir, 'normals', f"{i:04d}.png"))
             #if configargs.save_disparity_image:
