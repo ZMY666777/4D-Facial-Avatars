@@ -13,13 +13,12 @@ import yaml
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 import matplotlib.pyplot as plt
-from dataLoader import dataset_dict
 from nerf.load_flame import load_flame_data
 
 from nerf import (CfgNode, get_embedding_function, get_ray_bundle, img2mse,
                   load_llff_data, meshgrid_xy, models,
                   mse2psnr, run_one_iter_of_nerf, dump_rays, GaussianSmoothing)
-
+from dataLoader import dataset_dict
 from TensoRF.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
 #from gpu_profile import gpu_profile
 
@@ -64,17 +63,18 @@ def main():
             from torch.utils.data import DataLoader
             from torch.utils.data import Dataset
             from nerf import nerface_dataloader
+            # training_data = dataset('../../../datasets/nerface_dataset/person_4/', split='train', is_stack=False,N_vis = 100)
             training_data = nerface_dataloader.NerfaceDataset(
                 mode='train',
                 cfg=cfg,
                 N_max=100
             )
 
+
             validation_data = nerface_dataloader.NerfaceDataset(
                 mode='val',
                 cfg=cfg,
                 N_max=1
-
             )
 
             H = training_data.H
@@ -110,8 +110,17 @@ def main():
         log_sampling=cfg.models.coarse.log_sampling_xyz,
     )
     model_name = 'TensorVMSplit'
-    aabb = torch.tensor([[-1.0000, -1.0000, -1.0000], [1.0000, 1.0000, 1.0000]], device='cuda:0')
-    reso_cur = [512, 512, 64]
+    # aabb = torch.tensor([[-0.19, -0.1872, -0.23], [0.1776, 0.1927, 0.3645]], device='cuda:0')
+    # aabb = torch.tensor([[-0.05672, -0.1672, -0.23], [0.1176, 0.2927, 0.3645]], device='cuda:0')
+    # aabb = torch.tensor([[-0.42067725,-0.43867725,-0.38817725], [0.41167725,0.39367725,0.44417725]], device='cuda:0')
+    # aabb = torch.tensor([[-0.221, -0.152, -0.303], [0.2120, 0.107, 0.3590]], device='cuda:0')
+    # aabb = torch.tensor([[-0.2172, -0.2672, -0.296], [0.1676, 0.3927, 0.3475]], device='cuda:0')
+    aabb = torch.tensor([[-0.15, -0.15, -0.15], [0.15, 0.15, 0.15]], device='cuda:0')
+    # aabb = torch.tensor([[-0.15672, -0.2672, -0.169], [0.1576, 0.3927, 0.1545]], device='cuda:0')
+    # aabb = torch.tensor([[-0.05672, -0.2672, 0.169], [0.1576, 0.3927, 0.3545]], device='cuda:0')
+    # aabb = torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]], device='cuda:0')
+    # aabb = torch.tensor([[-0.0438, -0.797, -0.4], [0.1719, 0.491, 1.204]], device='cuda:0')
+    reso_cur = [128, 128, 128]
     n_lamb_sigma = [16, 16, 16]
     n_lamb_sh = [48, 48, 48]
     data_dim_color = 27
@@ -208,7 +217,7 @@ def main():
     os.makedirs(logdir, exist_ok=True)
     writer = SummaryWriter(logdir)
     # Write out config parameters.
-    with open(os.path.join(logdir, "config.yml"), "w") as f:
+    with open(os.path.join(logdir, "config.yaml"), "w") as f:
         f.write(cfg.dump())  # cfg, f, default_flow_style=False)
 
     # By default, start at iteration 0 (unless a checkpoint is specified).
@@ -247,6 +256,18 @@ def main():
 
     print("Starting loop")
     for i in trange(start_iter, cfg.experiment.train_iters):
+        # if i == 3000:
+        #     tensorf.gridSize = [512,512,64]
+        #     tensorf.update_stepSize([512,512,64])
+        #     tensorf.init_svd_volume(512, device)
+        # if i == 1000:
+        #     # print("that's it")
+        #     # if reso_cur[0] * reso_cur[1] * reso_cur[2] < 256 ** 3:  # update volume resolution
+        #     #     reso_mask = reso_cur
+        #     # new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
+        #     # if i == 3000:
+        #     #     tensorf.shrink(new_aabb)
+        #     tensorf.update_stepSize([512,512,64])
 
         model_coarse.train()
         # if model_fine:
@@ -255,7 +276,9 @@ def main():
         rgb_coarse, rgb_fine = None, None
         target_ray_values = None
         background_ray_values = None
+
         if USE_CACHED_DATASET:
+            print("USE CACHE")
             datafile = np.random.choice(train_paths)
             cache_dict = torch.load(datafile)
             ray_bundle = cache_dict["ray_bundle"].to(device)
@@ -292,7 +315,6 @@ def main():
                 expressions=expressions
             )
         else:
-
             img_idx = np.random.choice(len(training_data))
             img, pose, [H, W, focal], expression, probs = training_data[img_idx]
 
@@ -312,6 +334,7 @@ def main():
                 latent_codes = torch.zeros(32, device=device)
             #latent_code = torch.zeros(32).to(device)
             ray_origins, ray_directions = get_ray_bundle(H, W, focal, pose_target)
+
             coords = torch.stack(
                 meshgrid_xy(torch.arange(H).to(device), torch.arange(W).to(device)),
                 dim=-1,
@@ -323,7 +346,9 @@ def main():
             #     dim=-1,
             # )
             # 选像素坐标生成光线
+
             coords = coords.reshape((-1, 2))
+            
             # select_inds = np.random.choice(
             #     coords.shape[0], size=(cfg.nerf.train.num_random_rays), replace=False
             # )
@@ -336,6 +361,7 @@ def main():
             select_inds = coords[select_inds]
             ray_origins = ray_origins[select_inds[:, 0], select_inds[:, 1], :]
             ray_directions = ray_directions[select_inds[:, 0], select_inds[:, 1], :]
+            
             #dump_rays(ray_origins, ray_directions)
 
             # batch_rays = torch.stack([ray_origins, ray_directions], dim=0)

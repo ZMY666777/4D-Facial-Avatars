@@ -3,7 +3,6 @@ import torch.nn
 import torch.nn.functional as F
 from .sh import eval_sh_bases
 import numpy as np
-from nerf.nerf_helpers import cumprod_exclusive
 import time
 
 
@@ -19,8 +18,10 @@ def raw2alpha(sigma, dist):
     # sigma, dist  [N_rays, N_samples]
     alpha = 1. - torch.exp(-sigma*dist)
 
-    weights = alpha * cumprod_exclusive(1.0 - alpha + 1e-10) # [N_rays, N_samples]
-    return alpha, weights, cumprod_exclusive(1.0 - alpha + 1e-10)
+    T = torch.cumprod(torch.cat([torch.ones(alpha.shape[0], 1).to(alpha.device), 1. - alpha + 1e-10], -1), -1)
+
+    weights = alpha * T[:, :-1]  # [N_rays, N_samples]
+    return alpha, weights, T[:,-1:]
 
 
 def SHRender(xyz_sampled, viewdirs, features):
@@ -63,6 +64,7 @@ class MLPRender_Fea(torch.nn.Module):
         self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel
         self.viewpe = viewpe
         self.feape = feape
+        self.featureC = featureC
         layer1 = torch.nn.Linear(self.in_mlpC, featureC)
         layer2 = torch.nn.Linear(featureC, featureC)
         layer3 = torch.nn.Linear(featureC,3)
@@ -71,13 +73,18 @@ class MLPRender_Fea(torch.nn.Module):
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
     def forward(self, pts, viewdirs, features):
+        # viewdirs 2048*3
+        # features 2048*27
         indata = [features, viewdirs]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
+            # features 2048*108
         if self.viewpe > 0:
             indata += [positional_encoding(viewdirs, self.viewpe)]
+            # features 2048*12
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
+        rgb = torch.sigmoid(rgb)
 
         return rgb
 
@@ -409,14 +416,9 @@ class TensorBase(torch.nn.Module):
 
     def forward(self, rays_chunk, expr=None, latent_code=None, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1, background_prior = None):
         xyz, dirs = rays_chunk[..., : 3], rays_chunk[..., 3:]
-
+        # 2048 * 3+3
         x = xyz  # self.relu(self.layers_xyz[0](xyz))
-        # x[...,1:3] = -1 * x[...,1:3]
-        latent_code = latent_code.repeat(xyz.shape[0], 1)
-        expr_encoding = (expr * 1 / 3).repeat(xyz.shape[0], 1)
-        initial = torch.cat((xyz, expr_encoding, latent_code), dim=1)
         # x 65535 171(63+76+32)
-        x = initial
         # sample points
         viewdirs = rays_chunk[:, 3:6]
         if ndc_ray:
@@ -437,7 +439,6 @@ class TensorBase(torch.nn.Module):
                     ),
                     dim=-1,
             )
-            dists = dists * viewdirs[..., None, :].norm(p=2, dim=-1)
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
         
         if self.alphaMask is not None:
@@ -452,26 +453,26 @@ class TensorBase(torch.nn.Module):
         rgb = torch.zeros((*xyz_sampled.shape[:2], 3), device=xyz_sampled.device)
 
         if ray_valid.any():
-
             xyz_sampled = self.normalize_coord(xyz_sampled)
             sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
-
             validsigma = self.feature2density(sigma_feature)
             sigma[ray_valid] = validsigma
 
+        
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
-
+        # print("weight,",weight)
         app_mask = weight > self.rayMarch_weight_thres
 
         if app_mask.any():
-            app_features = self.compute_appfeature(xyz_sampled[app_mask])
+            app_features = self.compute_appfeature(xyz_sampled[app_mask], expr ,latent_code)
             valid_rgbs = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
             rgb[app_mask] = valid_rgbs
-        rgb[:, -1, :3] = background_prior
-        rgb_field = torch.sigmoid(rgb[:, :-1, :3])
-        rgb_field = torch.cat((rgb_field, rgb[:, -1, :3].unsqueeze(1)), dim=1)
+
+
+        # rgb_field = torch.sigmoid(rgb[:, :-1, :3])
+        # rgb_field = torch.cat((rgb_field, rgb[:, -1, :3].unsqueeze(1)), dim=1)
         acc_map = torch.sum(weight, -1)
-        rgb_map = torch.sum(weight[..., None] * rgb_field, -2)
+        rgb_map = torch.sum(weight[..., None] * rgb, -2)
         if white_bg or (is_train and torch.rand((1,))<0.5):
             rgb_map = rgb_map + (1. - acc_map[..., None])
 
@@ -480,7 +481,7 @@ class TensorBase(torch.nn.Module):
 
         with torch.no_grad():
             depth_map = torch.sum(weight * z_vals, -1)
-            depth_map = 1.0 / torch.max(1e-10 * torch.ones_like(depth_map), depth_map / acc_map)
+            depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
 
         return rgb_map, depth_map, weight #torch.cat((rgb,torch.unsqueeze(alpha,dim=-1)),dim = -1) rgb, sigma, alpha, weight, bg_weight
 

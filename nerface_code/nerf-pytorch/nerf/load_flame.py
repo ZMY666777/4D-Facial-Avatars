@@ -106,6 +106,7 @@ def load_flame_data(basedir, half_res=False, testskip=1, debug=False, expression
     expressions = np.concatenate(all_expressions, 0)
     bboxs = np.concatenate(all_bboxs, 0)
 
+
     H, W = imgs[0].shape[:2]
     camera_angle_x = float(meta["camera_angle_x"])
     focal = 0.5 * W / np.tan(0.5 * camera_angle_x)

@@ -253,7 +253,7 @@ def main():
     os.makedirs(logdir, exist_ok=True)
     writer = SummaryWriter(logdir)
     # Write out config parameters.
-    with open(os.path.join(logdir, "config.yml"), "w") as f:
+    with open(os.path.join(logdir, "config.yaml"), "w") as f:
         f.write(cfg.dump())  # cfg, f, default_flow_style=False)
 
     # By default, start at iteration 0 (unless a checkpoint is specified).

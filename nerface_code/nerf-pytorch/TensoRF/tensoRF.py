@@ -1,3 +1,4 @@
+
 from .tensorBase import *
 
 
@@ -145,11 +146,16 @@ class TensorVMSplit(TensorBase):
     def init_svd_volume(self, res, device):
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, self.gridSize, 0.1, device)
         self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.gridSize, 0.1, device)
+        layer1 = torch.nn.Linear(79, 128)
+        layer2 = torch.nn.Linear(128, 128)
+        layer3 = torch.nn.Linear(128, 3)
+        self.cal_expr = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False).to(device)
 
 
     def init_one_svd(self, n_component, gridSize, scale, device):
         plane_coef, line_coef = [], []
+
         for i in range(len(self.vecMode)):
             vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
@@ -220,10 +226,18 @@ class TensorVMSplit(TensorBase):
 
         return sigma_feature
 
+    def calculate_offset(self, xyz_sampled, expr):
+        expr = expr.repeat(xyz_sampled.shape[0], 1)
+        input_data = torch.cat((xyz_sampled, expr), dim=1)
+        offset = self.cal_expr(input_data)
+        return offset
 
-    def compute_appfeature(self, xyz_sampled):
-
+    def compute_appfeature(self, xyz_sampled, expr, latent_code):
         # plane + line basis
+        offset = self.calculate_offset(xyz_sampled, expr)
+        plane_offset = torch.stack((offset[..., self.matMode[0]], offset[..., self.matMode[1]], offset[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
+        line_offset = torch.stack((offset[..., self.vecMode[0]], offset[..., self.vecMode[1]], offset[..., self.vecMode[2]]))
+        line_offset = torch.stack((torch.zeros_like(line_offset), line_offset), dim=-1).detach().view(3, -1, 1, 2)
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)

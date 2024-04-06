@@ -9,10 +9,12 @@ from .volume_rendering_utils import volume_render_radiance_field
 def run_network(network_fn, pts, ray_batch, chunksize, embed_fn, embeddirs_fn, expressions = None, latent_code = None, N_samples = -1, background_prior = None):
 
     pts_flat = pts.reshape((-1, pts.shape[-1]))
+    
     # ray_batch 2048*8
     # pts 2048*64*3
     # pts_flat 131072*3
     embedded = embed_fn(pts_flat)
+    # embedded 131072*3
     if embeddirs_fn is not None:
         ro, rd = ray_batch[..., :3], ray_batch[..., 3:6]
         viewdirs = ray_batch[..., None, -3:]
@@ -87,9 +89,24 @@ def predict_and_render_radiance(
         z_vals = lower + (upper - lower) * t_rand
     # pts -> (num_rays, N_samples, 3)
     pts = ro[..., None, :] + rd[..., None, :] * z_vals[..., :, None]
+    # Find the min and max of each coordinate
+    # aabb = torch.tensor([[-0.221, -0.152, -0.303], [0.2120, 0.107, 0.3590]], device='cuda:0')
+    # x_min, _ = torch.min(torch.min(pts[:,:,0], dim=-1).values, 0)
+    # x_max, _ = torch.max(torch.max(pts[:,:,0], dim=-1).values, 0)
+    # if x_min < -0.222 or x_max > 0.2120:
+    #     print("x out of bounds", x_min, x_max)
+    # y_min, _= torch.min(torch.min(pts[:,:,1], dim=1).values, 0)
+    # y_max, _= torch.max(torch.max(pts[:,:,1], dim=1).values, 0)
+    # if y_min < -0.154 or y_max > 0.107:
+    #     print("y out of bounds", y_min, y_max)
+    # z_min, _= torch.min(torch.min(pts[:,:,2], dim=1).values, 0)
+    # z_max, _= torch.max(torch.max(pts[:,:,2], dim=1).values, 0)
+    #
+    # if z_min < -0.304 or z_max > 0.3590:
+    #     print("z out of bounds", z_min, z_max)
+
     # Uncomment to dump a ply file visualizing camera rays and sampling points
     #dump_rays(ro.detach().cpu().numpy(), pts.detach().cpu().numpy())
-
     rgb_coarse, disp_coarse, weights  = run_network(
         model_coarse,
         pts,
@@ -177,6 +194,7 @@ def run_one_iter_of_nerf(
             rd_ablations = ray_directions_ablation.view((-1, 3))
     near = options.dataset.near * torch.ones_like(rd[..., :1])
     far = options.dataset.far * torch.ones_like(rd[..., :1])
+
     rays = torch.cat((ro, rd, near, far), dim=-1)
     if is_rad:
         rays_ablation = torch.cat((ro, rd_ablations, near, far), dim=-1)

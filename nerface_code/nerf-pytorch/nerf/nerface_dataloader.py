@@ -27,6 +27,7 @@ class NerfaceDataset(Dataset):
         fname = os.path.join(basedir, frame["file_path"] + ".png")
         im = imageio.imread(fname)
         self.H, self.W = im.shape[:2]
+        self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
         poses = []
         expressions = []
@@ -50,6 +51,7 @@ class NerfaceDataset(Dataset):
             fname = os.path.join(basedir, frame["file_path"] + ".png")
             fnames.append(fname)
             poses.append(np.array(frame["transform_matrix"]))
+            # poses.append(np.array(frame["transform_matrix"]))
             expressions.append(np.array(frame["expression"]))
 
             if load_bbox:
@@ -86,7 +88,6 @@ class NerfaceDataset(Dataset):
 
         camera_angle_x = float(self.metas["camera_angle_x"])
         focal = 0.5 * self.W / np.tan(0.5 * camera_angle_x)
-
         # focals = (meta["focals"])
         #intrinsics = self.metas["intrinsics"] if self.metas["intrinsics"] else None
         if self.metas["intrinsics"]:
