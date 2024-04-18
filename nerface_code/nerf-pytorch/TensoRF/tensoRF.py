@@ -12,6 +12,7 @@ class TensorVM(TensorBase):
             0.1 * torch.randn((3, self.app_n_comp + self.density_n_comp, res, res), device=device))
         self.line_coef = torch.nn.Parameter(
             0.1 * torch.randn((3, self.app_n_comp + self.density_n_comp, res, 1), device=device))
+
         self.basis_mat = torch.nn.Linear(self.app_n_comp * 3, self.app_dim, bias=False, device=device)
 
     
@@ -146,10 +147,11 @@ class TensorVMSplit(TensorBase):
     def init_svd_volume(self, res, device):
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, self.gridSize, 0.1, device)
         self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.gridSize, 0.1, device)
-        layer1 = torch.nn.Linear(79, 128)
-        layer2 = torch.nn.Linear(128, 128)
-        layer3 = torch.nn.Linear(128, 3)
-        self.cal_expr = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
+        layer1 = torch.nn.Linear(108, 128)
+        layer2 = torch.nn.Linear(128, 6144)
+
+        self.cal_expr = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2)
+
         self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False).to(device)
 
 
@@ -226,30 +228,32 @@ class TensorVMSplit(TensorBase):
 
         return sigma_feature
 
-    def calculate_offset(self, xyz_sampled, expr):
+    def calculate_offset(self, xyz_sampled, expr, latent_code):
         expr = expr.repeat(xyz_sampled.shape[0], 1)
-        input_data = torch.cat((xyz_sampled, expr), dim=1)
-        offset = self.cal_expr(input_data)
-        return offset
+        latent_code = latent_code.repeat(xyz_sampled.shape[0], 1)
+        input_data = torch.cat((xyz_sampled, expr, latent_code), dim=1)
+        expr_offset = self.cal_expr(input_data)
+        return expr_offset
 
     def compute_appfeature(self, xyz_sampled, expr, latent_code):
         # plane + line basis
-        offset = self.calculate_offset(xyz_sampled, expr)
-        plane_offset = torch.stack((offset[..., self.matMode[0]], offset[..., self.matMode[1]], offset[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
-        line_offset = torch.stack((offset[..., self.vecMode[0]], offset[..., self.vecMode[1]], offset[..., self.vecMode[2]]))
-        line_offset = torch.stack((torch.zeros_like(line_offset), line_offset), dim=-1).detach().view(3, -1, 1, 2)
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
 
+        expr_offset = self.cal_expr(torch.cat((expr, latent_code), dim=-1))
+        expr_offset_vector = expr_offset.reshape(self.app_line[0].shape)
         plane_coef_point,line_coef_point = [],[]
         for idx_plane in range(len(self.app_plane)):
             plane_coef_point.append(F.grid_sample(self.app_plane[idx_plane], coordinate_plane[[idx_plane]],
                                                 align_corners=True).view(-1, *xyz_sampled.shape[:1]))
-            line_coef_point.append(F.grid_sample(self.app_line[idx_plane], coordinate_line[[idx_plane]],
+            if idx_plane != 0:
+                line_coef_point.append(F.grid_sample(self.app_line[idx_plane], coordinate_line[[idx_plane]],
                                             align_corners=True).view(-1, *xyz_sampled.shape[:1]))
+            else:
+                line_coef_point.append(F.grid_sample(self.app_line[idx_plane] * expr_offset_vector, coordinate_line[[idx_plane]],
+                                  align_corners=True).view(-1, *xyz_sampled.shape[:1]))
         plane_coef_point, line_coef_point = torch.cat(plane_coef_point), torch.cat(line_coef_point)
-
 
         return self.basis_mat((plane_coef_point * line_coef_point).T)
 

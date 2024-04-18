@@ -11,7 +11,7 @@ import time
 
 
 
-
+from utils import *
 import imageio
 import matplotlib
 import matplotlib.pyplot as plt
@@ -276,9 +276,11 @@ def main():
     reso_cur = [128, 128, 128]
     # aabb = torch.tensor([[-0.05672, -0.1672, -0.23], [0.1176, 0.2927, 0.3645]], device='cuda:0')
     # aabb = torch.tensor([[-0.05672, -0.2672, -0.169], [0.1576, 0.3927, 0.1545]], device='cuda:0')
-    aabb = torch.tensor([[-0.15, -0.15, -0.15], [0.15, 0.15, 0.15]], device='cuda:0')
+    aabb = torch.tensor([[-0.09, -0.09, -0.04], [0.09, 0.09, 0.05]], device='cuda:0') #1
+    #aabb = torch.tensor([[-0.17, -0.17, -0.1], [0.17, 0.17, 0.1]], device='cuda:0')  # 2
+    #aabb = torch.tensor([[-0.02, -0.02, -0.02], [0.02, 0.02, 0.02]], device='cuda:0')  # 3
     # aabb = torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]], device='cuda:0')
-    # reso_cur = [128, 128, 128]
+    reso_cur = N_to_reso(2097156, aabb)
     n_lamb_sigma = [16, 16, 16]
     n_lamb_sh = [48, 48, 48]
     data_dim_color = 27

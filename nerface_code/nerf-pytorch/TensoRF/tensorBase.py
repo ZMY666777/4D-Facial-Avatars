@@ -416,6 +416,7 @@ class TensorBase(torch.nn.Module):
 
     def forward(self, rays_chunk, expr=None, latent_code=None, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1, background_prior = None):
         xyz, dirs = rays_chunk[..., : 3], rays_chunk[..., 3:]
+        #print("background",background_prior.shape)
         # 2048 * 3+3
         x = xyz  # self.relu(self.layers_xyz[0](xyz))
         # x 65535 171(63+76+32)
@@ -462,7 +463,7 @@ class TensorBase(torch.nn.Module):
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
         # print("weight,",weight)
         app_mask = weight > self.rayMarch_weight_thres
-
+        #print("app_mask",app_mask.shape)
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask], expr ,latent_code)
             valid_rgbs = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
@@ -472,6 +473,7 @@ class TensorBase(torch.nn.Module):
         # rgb_field = torch.sigmoid(rgb[:, :-1, :3])
         # rgb_field = torch.cat((rgb_field, rgb[:, -1, :3].unsqueeze(1)), dim=1)
         acc_map = torch.sum(weight, -1)
+        rgb[:,-1,:3] = background_prior
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
         if white_bg or (is_train and torch.rand((1,))<0.5):
             rgb_map = rgb_map + (1. - acc_map[..., None])
